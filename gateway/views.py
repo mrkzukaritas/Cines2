@@ -1,52 +1,89 @@
-"""Puerta de entrada HTTP entre el frontend y el backend Spring Boot."""
+"""Microservicio de pagos de CineMatch.
+
+No contiene reglas de cine ni reservas: recibe una solicitud de Spring,
+simula la autorización de pago y confirma el resultado al webhook de Spring.
+"""
 
 import json
-import os
+import uuid
+from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from django.http import HttpResponse, JsonResponse
+from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET, require_POST
 
 
-SPRING_BACKEND_URL = os.getenv("SPRING_BACKEND_URL", "http://127.0.0.1:8081")
+METODOS_PERMITIDOS = {"TARJETA", "PSE", "EFECTIVO"}
+pagos = {}
+
+
+def respuesta_error(mensaje, status=400):
+    return JsonResponse({"detalle": mensaje}, status=status)
 
 
 @csrf_exempt
-def proxy(request, resource=""):
-    """Reenvía el método, cuerpo y respuesta al microservicio de negocio."""
-    path = f"/api/{resource}".rstrip("/") or "/api"
-    query = request.META.get("QUERY_STRING")
-    destination = f"{SPRING_BACKEND_URL}{path}"
-    if query:
-        destination = f"{destination}?{query}"
+@require_POST
+def procesar_pago(request):
+    try:
+        solicitud = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return respuesta_error("El cuerpo debe ser JSON válido.")
 
-    headers = {"Accept": request.headers.get("Accept", "application/json")}
-    if request.content_type:
-        headers["Content-Type"] = request.content_type
-    body = request.body if request.method not in {"GET", "DELETE"} else None
+    reserva_id = solicitud.get("reservaId")
+    metodo = str(solicitud.get("metodoPago", "")).upper()
+    webhook_url = solicitud.get("webhookUrl")
+    try:
+        monto = float(solicitud.get("monto", 0))
+    except (TypeError, ValueError):
+        monto = 0
+
+    if not reserva_id or not webhook_url:
+        return respuesta_error("reservaId y webhookUrl son obligatorios.")
+    if monto <= 0:
+        return respuesta_error("El monto debe ser mayor que cero.")
+    if metodo not in METODOS_PERMITIDOS:
+        return respuesta_error("Método de pago no soportado. Usa TARJETA, PSE o EFECTIVO.")
+
+    pago = {
+        "transaccionId": str(uuid.uuid4()),
+        "reservaId": reserva_id,
+        "metodoPago": metodo,
+        "monto": monto,
+        "estado": "APROBADO",
+        "fecha": datetime.now(timezone.utc).isoformat(),
+    }
+    pagos[pago["transaccionId"]] = pago
 
     try:
-        spring_request = Request(destination, data=body, headers=headers, method=request.method)
-        with urlopen(spring_request, timeout=10) as response:
-            return HttpResponse(
-                response.read(),
-                status=response.status,
-                content_type=response.headers.get_content_type(),
-            )
-    except HTTPError as error:
-        return HttpResponse(
-            error.read(),
-            status=error.code,
-            content_type=error.headers.get_content_type(),
+        callback = Request(
+            webhook_url,
+            data=json.dumps(pago).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
-    except URLError:
+        with urlopen(callback, timeout=10) as response:
+            if response.status < 200 or response.status >= 300:
+                raise URLError("Spring no confirmó el webhook.")
+    except (HTTPError, URLError):
+        pago["estado"] = "PENDIENTE_CONFIRMACION"
         return JsonResponse(
-            {
-                "error": "El backend Spring Boot no está disponible.",
-                "detalle": "Inicia el proyecto cinematch-backend en el puerto 8081.",
-            },
-            status=503,
+            {**pago, "detalle": "Pago creado, pero Spring aún no confirmó el webhook."},
+            status=202,
         )
 
-# Create your views here.
+    return JsonResponse(pago, status=201)
+
+
+@require_GET
+def listar_pagos(_request):
+    return JsonResponse(list(pagos.values()), safe=False)
+
+
+@require_GET
+def consultar_pago(_request, transaccion_id):
+    pago = pagos.get(transaccion_id)
+    if pago is None:
+        return respuesta_error("Transacción no encontrada.", status=404)
+    return JsonResponse(pago)

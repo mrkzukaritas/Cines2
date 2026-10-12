@@ -18,6 +18,7 @@ from django.urls import path
 from gateway import views
 
 urlpatterns = [
-    path('api/', views.proxy, name='api-root'),
-    path('api/<path:resource>', views.proxy, name='api-proxy'),
+    path('api/pagos/procesar', views.procesar_pago, name='procesar-pago'),
+    path('api/pagos', views.listar_pagos, name='listar-pagos'),
+    path('api/pagos/<str:transaccion_id>', views.consultar_pago, name='consultar-pago'),
 ]

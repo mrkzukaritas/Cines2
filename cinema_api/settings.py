@@ -22,7 +22,6 @@ INSTALLED_APPS = ['rest_framework', 'gateway']
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'gateway.middleware.FrontendCorsMiddleware',
     'django.middleware.common.CommonMiddleware',
 ]
 

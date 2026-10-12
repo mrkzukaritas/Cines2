@@ -1,13 +1,10 @@
-# CineMatch API (Django)
+# CineMatch - Microservicio de pagos (Django)
 
-Esta aplicación es la API Gateway del proyecto. Recibe las solicitudes del frontend y las reenvía por HTTP al backend de negocio hecho en Spring Boot.
+Esta aplicación procesa pagos de forma independiente. Spring Boot le envía una solicitud de pago por HTTP y Django confirma el resultado llamando al webhook de Spring. No reenvía las rutas de películas, cines, funciones o reservas.
 
 ## Ejecutar localmente
 
-1. Inicia `cinematch-backend` en el puerto `8081`.
-2. Instala las dependencias: `py -m pip install -r requirements.txt`.
-3. Ejecuta la API: `py manage.py runserver 8000`.
+1. Instala las dependencias: `py -m pip install -r requirements.txt`.
+2. Ejecuta la API: `py manage.py runserver 8000`.
 
-El frontend debe usar `http://127.0.0.1:8000/api` como URL base. Puedes verificar la comunicación en `GET /api/peliculas`.
-
-Para usar otra dirección del backend, define la variable `SPRING_BACKEND_URL` antes de iniciar Django.
+Spring Boot debe estar activo en el puerto `8081` para confirmar los pagos. Puedes consultar las transacciones locales en `GET /api/pagos`.
